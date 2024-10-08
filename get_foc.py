@@ -13,7 +13,7 @@ VK_IDS = [
     175952275, 206038535, 178728261
 ]
 
-GRAPH_FILENAME = 'friends-of-colleagues.yaml'
+GRAPH_FILENAME = 'foc.yaml'
 
 
 def fill_graph(vk, graph, id, deep=1, visited=None):
@@ -36,15 +36,8 @@ def fill_graph(vk, graph, id, deep=1, visited=None):
             print(f"VK api error on id {id} and deep {deep}\n {e}")
         return
 
-    fr_in_lst = False
     for fr_id in response['items']:
         graph.add_edge(id, fr_id)
-        if fr_id in VK_IDS:
-            fr_in_lst = True
-
-    if not fr_in_lst:
-        for fr_id in response['items']:
-            fill_graph(vk, graph, fr_id, deep + 1, visited)
 
 
 def main():
@@ -59,6 +52,7 @@ def main():
 
     with open(GRAPH_FILENAME, 'w') as file:
         yaml.dump(nx.node_link_data(friends_graph), file)
+
 
 if __name__ == "__main__":
     main()

@@ -1,39 +1,61 @@
 import vk_api
-import networkx as nx
 import yaml
+import networkx as nx
 from dotenv import load_dotenv
 import os
+import time
 
 load_dotenv()
 
 VK_TOKEN = os.getenv('VK_TOKEN')
 VK_IDS = [
-    225790978, 752279211, 202377873, 138716736, 306787585, 202038842,
-    352418484, 142470714, 203626707, 218147810, 253647021, 210835290,
-    175952275, 206038535, 178728261
+    202377873,
+    210835290
 ]
 
-GRAPH_FILENAME = 'friends-of-friends-of-colleagues.yaml'
+GRAPH_FILENAME = 'fofoc.yaml'
+PROGRESS_FILENAME = 'progress.yaml'
 
 
-def fill_graph(vk, graph, id, deep=1, visited=None):
-    if visited is None:
-        visited = set()
+def save_graph(graph, filename):
+    with open(filename, 'w') as file:
+        yaml.dump(nx.node_link_data(graph), file)
 
-    if id in visited:
+
+def load_graph(filename):
+    if os.path.exists(filename):
+        with open(filename, 'r') as file:
+            data = yaml.safe_load(file)
+            return nx.node_link_graph(data)
+    return nx.Graph()
+
+
+def save_progress(processed_ids):
+    with open(PROGRESS_FILENAME, 'w') as file:
+        yaml.dump(processed_ids, file)
+
+
+def load_progress():
+    if os.path.exists(PROGRESS_FILENAME):
+        with open(PROGRESS_FILENAME, 'r') as file:
+            return yaml.safe_load(file)
+    return set()
+
+
+def fill_graph(vk, graph, id, processed_ids, deep=1):
+    if id in processed_ids:
         return
-
-    visited.add(id)
-
     max_cnt = 30
 
     try:
         response = vk.friends.get(user_id=id, count=max_cnt)
     except vk_api.exceptions.ApiError as e:
-        if e.code == 30:
-            print(f"Profile {id} is private, skipping...")
-        else:
-            print(f"VK api error on id {id} and deep {deep}\n {e}")
+        print(f"VK api error on id {id} and deep {deep}\n {e}")
+        if 'Rate limit reached' in str(e):
+            print("Saving progress due to rate limit...")
+            save_graph(graph, GRAPH_FILENAME)
+            save_progress(processed_ids)
+            time.sleep(60)
         return
 
     fr_in_lst = False
@@ -41,24 +63,37 @@ def fill_graph(vk, graph, id, deep=1, visited=None):
         graph.add_edge(id, fr_id)
         if fr_id in VK_IDS:
             fr_in_lst = True
+    processed_ids.add(id)
+    save_progress(processed_ids)
 
-    if not fr_in_lst and deep < 2:
+    if (not fr_in_lst) and (deep < 4):
+        deep += 1
         for fr_id in response['items']:
-            fill_graph(vk, graph, fr_id, deep + 1, visited)
+            fill_graph(vk, graph, fr_id, processed_ids, deep)
+
+
+def filter_graph(graph):
+    nodes_to_remove = [node for node in graph.nodes if graph.degree(node) <= 1 and node not in VK_IDS]
+    graph.remove_nodes_from(nodes_to_remove)
 
 
 def main():
     vk_session = vk_api.VkApi(token=VK_TOKEN)
     vk = vk_session.get_api()
-    friends_graph = nx.Graph()
+
+    friends_graph = load_graph(GRAPH_FILENAME)
+    processed_ids = load_progress()
+
     for id in VK_IDS:
         print(id)
-        fill_graph(vk, friends_graph, id)
+        fill_graph(vk, friends_graph, id, processed_ids)
+
+    filter_graph(friends_graph)
 
     print(f"Number of nodes: {friends_graph.number_of_nodes()}")
 
-    with open(GRAPH_FILENAME, 'w') as file:
-        yaml.dump(nx.node_link_data(friends_graph), file)
+    save_graph(friends_graph, GRAPH_FILENAME)
+
 
 if __name__ == "__main__":
     main()
